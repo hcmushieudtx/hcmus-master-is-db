@@ -1,0 +1,173 @@
+package mongo
+
+import (
+	"bookstore/backend/internal/domain"
+	"context"
+	"fmt"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+const collBooks = "books"
+
+// BookRepository implements domain.BookRepository against MongoDB.
+type BookRepository struct {
+	col *mongo.Collection
+}
+
+// NewBookRepository creates a BookRepository that operates on the "books" collection.
+func NewBookRepository(client *mongo.Client, dbName string) *BookRepository {
+	return &BookRepository{col: client.Database(dbName).Collection(collBooks)}
+}
+
+// SearchBooks performs a full-text or filter-based search on the books collection.
+func (r *BookRepository) SearchBooks(ctx context.Context, filter domain.BookFilter) ([]*domain.Book, int64, error) {
+	query := bson.D{}
+
+	if filter.Query != "" {
+		query = append(query, bson.E{Key: "$text", Value: bson.D{{Key: "$search", Value: filter.Query}}})
+	}
+	if filter.Genre != "" {
+		query = append(query, bson.E{Key: "genres", Value: filter.Genre})
+	}
+	if filter.Author != "" {
+		query = append(query, bson.E{Key: "authors", Value: filter.Author})
+	}
+	if filter.Publisher != "" {
+		query = append(query, bson.E{Key: "publisher", Value: filter.Publisher})
+	}
+
+	total, err := r.col.CountDocuments(ctx, query)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count books: %w", err)
+	}
+
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := filter.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+
+	opts := options.Find().
+		SetSort(bson.D{{Key: "created_at", Value: -1}}).
+		SetSkip(int64((page - 1) * pageSize)).
+		SetLimit(int64(pageSize))
+
+	cur, err := r.col.Find(ctx, query, opts)
+	if err != nil {
+		return nil, 0, fmt.Errorf("find books: %w", err)
+	}
+	defer cur.Close(ctx)
+
+	var books []*domain.Book
+	if err := cur.All(ctx, &books); err != nil {
+		return nil, 0, fmt.Errorf("decode books: %w", err)
+	}
+
+	return books, total, nil
+}
+
+// GetBookByID fetches a single book by its MongoDB ObjectID string.
+func (r *BookRepository) GetBookByID(ctx context.Context, id string) (*domain.Book, error) {
+	oid, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid book id: %w", err)
+	}
+
+	var book domain.Book
+	err = r.col.FindOne(ctx, bson.M{"_id": oid}).Decode(&book)
+	if err == mongo.ErrNoDocuments {
+		return nil, nil
+	}
+	return &book, err
+}
+
+// GetBooksByIDs fetches multiple books by their MongoDB ObjectID strings.
+func (r *BookRepository) GetBooksByIDs(ctx context.Context, ids []string) ([]*domain.Book, error) {
+	oids := make([]primitive.ObjectID, 0, len(ids))
+	for _, id := range ids {
+		oid, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			continue
+		}
+		oids = append(oids, oid)
+	}
+
+	cur, err := r.col.Find(ctx, bson.M{"_id": bson.M{"$in": oids}})
+	if err != nil {
+		return nil, fmt.Errorf("find books by ids: %w", err)
+	}
+	defer cur.Close(ctx)
+
+	var books []*domain.Book
+	if err := cur.All(ctx, &books); err != nil {
+		return nil, fmt.Errorf("decode books: %w", err)
+	}
+	return books, nil
+}
+
+// GetNewestBooks returns the most recently added books.
+func (r *BookRepository) GetNewestBooks(ctx context.Context, limit int) ([]*domain.Book, error) {
+	opts := options.Find().
+		SetSort(bson.D{{Key: "created_at", Value: -1}}).
+		SetLimit(int64(limit))
+
+	cur, err := r.col.Find(ctx, bson.D{}, opts)
+	if err != nil {
+		return nil, fmt.Errorf("find newest books: %w", err)
+	}
+	defer cur.Close(ctx)
+
+	var books []*domain.Book
+	if err := cur.All(ctx, &books); err != nil {
+		return nil, fmt.Errorf("decode books: %w", err)
+	}
+	return books, nil
+}
+
+// CreateBook inserts a new book document and returns its generated MongoDB ID.
+func (r *BookRepository) CreateBook(ctx context.Context, book *domain.Book) (string, error) {
+	book.CreatedAt = time.Now()
+	book.UpdatedAt = time.Now()
+
+	res, err := r.col.InsertOne(ctx, book)
+	if err != nil {
+		return "", fmt.Errorf("insert book: %w", err)
+	}
+
+	oid, ok := res.InsertedID.(primitive.ObjectID)
+	if !ok {
+		return "", fmt.Errorf("unexpected inserted id type")
+	}
+	return oid.Hex(), nil
+}
+
+// UpdateBook replaces mutable fields on an existing book document.
+func (r *BookRepository) UpdateBook(ctx context.Context, id string, book *domain.Book) error {
+	oid, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return fmt.Errorf("invalid book id: %w", err)
+	}
+	book.UpdatedAt = time.Now()
+
+	update := bson.M{"$set": book}
+	_, err = r.col.UpdateOne(ctx, bson.M{"_id": oid}, update)
+	return err
+}
+
+// DeleteBook removes a book document by ID.
+func (r *BookRepository) DeleteBook(ctx context.Context, id string) error {
+	oid, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return fmt.Errorf("invalid book id: %w", err)
+	}
+	_, err = r.col.DeleteOne(ctx, bson.M{"_id": oid})
+	return err
+}

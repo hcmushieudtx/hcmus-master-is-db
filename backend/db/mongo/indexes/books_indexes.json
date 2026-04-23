@@ -1,0 +1,53 @@
+[
+  {
+    "collection": "books",
+    "comment": "Full-text search on title and authors for the /books?q= endpoint",
+    "index": {
+      "key": { "title": "text", "authors": "text" },
+      "name": "books_text_search",
+      "weights": { "title": 10, "authors": 5 },
+      "default_language": "none"
+    }
+  },
+  {
+    "collection": "books",
+    "comment": "Compound index to efficiently filter by genre and sort by price",
+    "index": {
+      "key": { "genres": 1, "price": 1 },
+      "name": "books_genre_price"
+    }
+  },
+  {
+    "collection": "books",
+    "comment": "Index to support filtering books by a specific author",
+    "index": {
+      "key": { "authors": 1 },
+      "name": "books_authors"
+    }
+  },
+  {
+    "collection": "books",
+    "comment": "Index to support filtering books by publisher",
+    "index": {
+      "key": { "publisher": 1 },
+      "name": "books_publisher"
+    }
+  },
+  {
+    "collection": "books",
+    "comment": "Index for newest-books query (sorted by created_at descending)",
+    "index": {
+      "key": { "created_at": -1 },
+      "name": "books_created_at_desc"
+    }
+  },
+  {
+    "collection": "books",
+    "comment": "Index for series lookup used by the recommendation engine",
+    "index": {
+      "key": { "series_name": 1, "volume_order": 1 },
+      "name": "books_series_volume",
+      "sparse": true
+    }
+  }
+]

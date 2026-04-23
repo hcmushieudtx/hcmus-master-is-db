@@ -28,5 +28,45 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+ .idea/
+ .vscode/
+
+# Backend files
+./backend/vendor
+./backend/bin/
+./backend/.env
+./backend/.env.local
+./backend/*.env
+./backend/coverage.txt
+
+# dependencies
+./frontend/node_modules
+./frontend/.pnp
+./frontend/.pnp.js
+
+# testing
+./frontend/coverage
+
+# next.js
+./frontend/.next/
+./frontend/out/
+
+# production
+./frontend/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+./frontend/npm-debug.log*
+./frontend/yarn-debug.log*
+./frontend/yarn-error.log*
+
+# local env files
+./frontend/.env*.local
+./frontend/.env
+
+# typescript
+./frontend/*.tsbuildinfo
+./frontend/next-env.d.ts
