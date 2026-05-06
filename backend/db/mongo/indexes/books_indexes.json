@@ -1,27 +1,33 @@
 [
   {
+    "_comment": "Cấu hình index cho collection 'books'",
     "collection": "books",
     "indexes": [
       {
         "name": "slug_unique",
         "keys": { "slug": 1 },
-        "options": { "unique": true, "sparse": true }
+        "options": { "unique": true, "sparse": true },
+        "description": "Index duy nhất trên slug. 'unique: true' đảm bảo không trùng lặp. 'sparse: true' cho phép bỏ qua các document không có trường slug (tránh lỗi unique trên giá trị null)."
       },
       {
         "name": "authors_slug",
-        "keys": { "authors.slug": 1 }
+        "keys": { "authors.slug": 1 },
+        "description": "Index trên trường slug của mảng authors. '1' nghĩa là sắp xếp tăng dần (Ascending)."
       },
       {
         "name": "category_publish_year",
-        "keys": { "category.categoryId": 1, "publishYear": -1 }
+        "keys": { "category.categoryId": 1, "publishYear": -1 },
+        "description": "Compound Index (Index kết hợp). Sắp xếp theo categoryId tăng dần (1) và publishYear giảm dần (-1). Giúp tối ưu các query lọc theo category và sắp xếp theo năm mới nhất."
       },
       {
         "name": "series_sequence",
-        "keys": { "series.seriesId": 1, "series.sequenceNo": 1 }
+        "keys": { "series.seriesId": 1, "series.sequenceNo": 1 },
+        "description": "Compound Index giúp truy vấn các tập trong cùng một bộ truyện (series) theo thứ tự tập."
       },
       {
         "name": "imported_at_desc",
-        "keys": { "importedAt": -1 }
+        "keys": { "importedAt": -1 },
+        "description": "Index giảm dần trên thời gian nhập sách. Tối ưu cho việc lấy danh sách sách mới nhập."
       },
       {
         "name": "text_search",
@@ -40,22 +46,57 @@
             "tags.tagName": 1
           },
           "default_language": "english"
-        }
+        },
+        "description": "Text Index cho tìm kiếm toàn văn. 'weights' xác định độ ưu tiên của các trường. 'default_language' kích hoạt bộ quy tắc ngôn ngữ để thực hiện Stemming (đưa từ về gốc, ví dụ: 'run', 'runs', 'running', 'ran' -> 'run') và loại bỏ Stop words (các từ phổ biến nhưng ít ý nghĩa như 'the', 'a', 'an', 'or', 'and')."
       }
     ]
   },
   {
+    "_comment": "Cấu hình index cho collection 'categories'",
     "collection": "categories",
     "indexes": [
       {
         "name": "slug_unique",
         "keys": { "slug": 1 },
-        "options": { "unique": true }
+        "options": { "unique": true },
+        "description": "Đảm bảo slug của danh mục là duy nhất."
       },
       {
         "name": "parent_category_id",
-        "keys": { "parentCategory": 1 }
+        "keys": { "parentCategory": 1 },
+        "description": "Tối ưu truy vấn lấy danh mục con của một danh mục cha."
       }
     ]
+  },
+  {
+    "_comment": "Cấu hình index cho collection 'view_event_logs' (Analytics)",
+    "collection": "view_event_logs",
+    "indexes": [
+      {
+        "name": "book_id",
+        "keys": { "bookId": 1 },
+        "description": "Tối ưu truy vấn thống kê lượt xem theo từng cuốn sách."
+      },
+      {
+        "name": "event_type_created_at",
+        "keys": { "eventType": 1, "createdAt": -1 },
+        "description": "Tối ưu truy vấn lấy các sự kiện theo loại (VIEWED, v.v.) và sắp xếp theo thời gian mới nhất."
+      }
+    ]
+  },
+  {
+    "_metadata": {
+      "key_meanings": {
+        "1": "Sắp xếp tăng dần (Ascending)",
+        "-1": "Sắp xếp giảm dần (Descending)",
+        "text": "Sử dụng cho Full-text search"
+      },
+      "option_meanings": {
+        "unique": "Đảm bảo giá trị trong index là duy nhất trên toàn collection",
+        "sparse": "Chỉ index các document có tồn tại trường được index (giúp tiết kiệm không gian và tránh lỗi unique trên null)",
+        "weights": "Độ ưu tiên của các trường trong Text Index (số càng cao ưu tiên càng lớn)",
+        "default_language": "Ngôn ngữ dùng để xử lý Stemming (rút gọn từ về gốc) và loại bỏ Stop words (từ dừng) giúp tăng độ chính xác khi tìm kiếm."
+      }
+    }
   }
 ]

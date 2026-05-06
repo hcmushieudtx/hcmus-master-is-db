@@ -99,14 +99,9 @@ db-admin-pg:
 	@docker exec bookstore_postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB) -c "GRANT ALL PRIVILEGES ON DATABASE $(POSTGRES_DB) TO bookstore_admin;"
 
 db-init-mongo:
-	@echo "Creating MongoDB indexes..."
-	docker exec bookstore_mongo mongosh -u $(MONGO_USER) -p $(MONGO_PASSWORD) --authenticationDatabase admin \
-	  --eval "db = db.getSiblingDB('$(MONGO_DB)'); \
-	          db.createCollection('books'); db.createCollection('categories'); db.createCollection('view_event_logs'); \
-	          db.view_event_logs.createIndex({bookId: 1}); \
-	          db.view_event_logs.createIndex({eventType: 1, createdAt: -1}); \
-	          db.books.createIndex({name: 'text', shortDescription: 'text'}); \
-	          db.books.createIndex({createdAt: -1});"
+	@echo "MongoDB indexes will be managed by the application on startup."
+	@echo "Pinging MongoDB..."
+	@docker exec bookstore_mongo mongosh -u $(MONGO_USER) -p $(MONGO_PASSWORD) --authenticationDatabase admin --quiet --eval "db.adminCommand('ping')"
 
 db-init-neo4j:
 	@echo "Applying Neo4j graph constraints..."

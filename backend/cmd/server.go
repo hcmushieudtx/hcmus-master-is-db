@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bookstore/backend/config"
+	"bookstore/backend/db/mongo/indexes"
 	mongorepo "bookstore/backend/internal/repository/mongo"
 	"bookstore/backend/internal/repository/neo4j"
 	"bookstore/backend/internal/repository/postgres"
@@ -48,6 +49,13 @@ func runServer(cfg *config.Config, logger *zap.Logger) error {
 	}
 	defer mongoClient.Disconnect(ctx) //nolint:errcheck
 	logger.Info("connected to MongoDB")
+
+	// Ensure MongoDB indexes are created
+	if err := database.EnsureMongoIndexes(ctx, mongoClient, cfg.Mongo.DB, indexes.BooksIndexesJSON); err != nil {
+		logger.Warn("failed to ensure MongoDB indexes", zap.Error(err))
+	} else {
+		logger.Info("ensured MongoDB indexes")
+	}
 
 	// ── Neo4j ─────────────────────────────────────────────────────────────
 	neo4jDriver, err := database.ConnectNeo4j(cfg.Neo4j)
