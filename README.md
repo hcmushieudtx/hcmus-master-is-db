@@ -115,55 +115,46 @@ The system solves four core technical challenges:
 
 ### 2.1. Overall System Architecture
 
-```
-┌──────────────────┐    REST / JSON (HTTPS)      ┌────────────────────────────────────────────┐
-│  Next.js          │ ──────────────────────────► │         Gin HTTP Server                    │
-│  Frontend         │ ◄──────────────────────────  │   internal/server  (Port 8080)             │
-│  (Port 3000)      │                              └───────────────┬────────────────────────────┘
-└──────────────────┘                                               │
-                                                        JWT Authentication Middleware
-                                                      (RequireAuth / RequireUser / RequireAdmin)
-                                                                   │
-                                                 ┌─────────────────▼───────────────────────────┐
-                                                 │           internal/domain                    │
-                                                 │   Repository Interfaces + Domain Models       │
-                                                 └──┬──────────┬───────────┬────────────────────┘
-                                                    │          │           │            │
-                                         ┌──────────▼──┐ ┌────▼───┐ ┌────▼────┐ ┌────▼──────────┐
-                                         │ PostgreSQL   │ │MongoDB │ │  Neo4j  │ │    Redis       │
-                                         │ (Port 5432)  │ │(27017) │ │  (7687) │ │   (6379)       │
-                                         │              │ │        │ │         │ │                │
-                                         │ users        │ │books   │ │ Book    │ │ Sessions       │
-                                         │ addresses    │ │catego- │ │ Author  │ │ Cart cache     │
-                                         │ books_ref    │ │ ries   │ │ Catego- │ │ Best sellers   │
-                                         │ inventory    │ │view_   │ │  ry     │ │ Most viewed    │
-                                         │ carts        │ │event_  │ │ Publish-│ │ Order history  │
-                                         │ cart_items   │ │ logs   │ │  er     │ │ Category list  │
-                                         │ orders       │ │        │ │ Tag     │ │ Buy-now session│
-                                         │ order_items  │ │        │ │ Series  │ │                │
-                                         │ order_status │ │        │ │         │ │                │
-                                         │  _history    │ │        │ │         │ │                │
-                                         │ payments     │ │        │ │         │ │                │
-                                         │ shipments    │ │        │ │         │ │                │
-                                         └──────────────┘ └────────┘ └─────────┘ └────────────────┘
-                                                                           ▲
-                                           ┌───────────────────────────────┘
-                                           │         internal/worker/
-                                           │
-                                           │  best_seller_worker.go  (daily 00:00 UTC)
-                                           │    → Query PostgreSQL order_items (past 30 days)
-                                           │    → Write top-10 JSON to Redis "books:best_sellers"
-                                           │       (Snappy-compressed STRING, TTL 1 day)
-                                           │
-                                           │  most_viewed_worker.go  (daily 00:00 UTC)
-                                           │    → Aggregate MongoDB view_event_logs (past 30 days)
-                                           │    → Write JSON to Redis "books:most_viewed:30d:data"
-                                           │       (Snappy-compressed STRING, TTL 1 day)
-                                           │    → DEL "books:most_viewed:daily:count"
-                                           │       (new day starts from zero)
-                                           │    → DEL "books:most_viewed:daily:data"
-                                           │       (force fresh rebuild on next API call)
-                                           └───────────────────────────────────────────────────
+```text
+┌──────────────────┐      REST / JSON (HTTPS)      ┌────────────────────────────────────────────┐
+│     Next.js      │ ────────────────────────────► │              Gin HTTP Server               │
+│    Frontend      │ ◄──────────────────────────── │        internal/server  (Port 8080)        │
+│   (Port 3000)    │                               └─────────────────────┬──────────────────────┘
+└──────────────────┘                                                     │
+                                                           JWT Authentication Middleware
+                                                     (RequireAuth / RequireUser / RequireAdmin)
+                                                                         │
+                                               ┌─────────────────────────▼──────────────────────┐
+                                               │                internal/domain                 │
+                                               │      Repository Interfaces + Domain Models     │
+                                               └──────┬───────────┬────────────┬───────────┬────┘
+                                                      │           │            │           │
+                 ┌────────────────────────────────────┘           │            │           └──────────────────────────────────┐
+                 │                                                │            │                                              │
+      ┌──────────▼──────────┐                          ┌──────────▼────────┐ ┌────▼──────────────┐                     ┌──────▼──────────────┐
+      │     PostgreSQL      │                          │      MongoDB      │ │       Neo4j       │                     │        Redis        │
+      │    (Port 5432)      │                          │    (Port 27017)   │ │    (Port 7687)    │                     │    (Port 6379)      │
+      ├─────────────────────┤                          ├───────────────────┤ ├───────────────────┤                     ├─────────────────────┤
+      │ users               │                          │ books             │ │ Book              │                     │ Sessions            │
+      │ addresses           │                          │ categories        │ │ Author            │                     │ Cart cache          │
+      │ books_ref           │                          │ view_event_logs   │ │ Category          │                     │ Best sellers        │
+      │ inventory           │                          └──────────▲────────┘ │ Publisher         │                     │ Most viewed         │
+      │ carts               │                                     │          │ Tag               │                     │ Order history       │
+      │ cart_items          │                                     │          │ Series            │                     │ Category list       │
+      │ orders              │                                     │          └───────────────────┘                     │ Buy-now session     │
+      │ order_items         │                                     │                                                    └──────────▲──────────┘
+      │ order_status        │                                     │                                                               │
+      │  _histories         │                                     │                internal/worker/                               │
+      │ payments            │                                     │                                                               │
+      │ shipments           │                                     └─────── best_seller_worker.go  (daily 00:00 UTC) ──────────────┘
+      └──────────▲──────────┘                                              → Query PostgreSQL order_items (past 30 days)
+                 │                                                        → Write top-10 JSON to Redis "books:best_sellers"
+                 │
+                 └──────────────────────────────────────────────────────── most_viewed_worker.go  (daily 00:00 UTC)
+                                                                           → Aggregate MongoDB view_event_logs (past 30 days)
+                                                                           → Write JSON to Redis "books:most_viewed:30d:data"
+                                                                           → DEL "books:most_viewed:daily:count"
+                                                                           → DEL "books:most_viewed:daily:data"
 ```
 
 ---
@@ -177,7 +168,7 @@ The system solves four core technical challenges:
    - `DELETE cart_items` via `carts` cascade
    - `INSERT orders` + `INSERT order_items` (price snapshot at purchase time)
    - `UPDATE inventory stock_quantity` (deduct purchased quantity)
-   - `INSERT order_status_history` (`old_status = NULL`, `new_status = 'pending'`)
+   - `INSERT order_status_histories` (`old_status = NULL`, `new_status = 'pending'`)
 3. **After transaction**: invalidate Redis cart cache + order-history cache + stale stock cache entries
 
 #### View Book Flow (B2 + E3)
@@ -238,7 +229,7 @@ and API ergonomics:
 | `cart_items` | `(cart_id BIGINT FK, book_id TEXT FK)` composite | — | `quantity INT CHECK(>0)`, `updated_at` | Cart line items; ON DELETE CASCADE from carts |
 | `orders` | `id BIGSERIAL` | `alias_id UUID` | `user_id BIGINT FK→users.id`, `status` ENUM, `total_amount NUMERIC`, `address_id BIGINT FK→addresses.id nullable`, `note`, `created_at` | Order headers |
 | `order_items` | `id BIGSERIAL` | — | `order_id BIGINT FK→orders.id`, `mongo_book_id TEXT`, `name TEXT` (snapshot), `quantity INT`, `unit_price NUMERIC` (snapshot) | Immutable price snapshots; remains readable even if the MongoDB document changes |
-| `order_status_history` | `id BIGSERIAL` | `alias_id UUID` | `order_id BIGINT FK→orders.id`, `old_status VARCHAR nullable`, `new_status VARCHAR`, `changed_by_admin_alias_id UUID nullable` (denormalised), `note`, `changed_at` | Full audit trail of every status transition |
+| `order_status_histories` | `id BIGSERIAL` | `alias_id UUID` | `order_id BIGINT FK→orders.id`, `old_status VARCHAR nullable`, `new_status VARCHAR`, `changed_by_admin_alias_id UUID nullable` (denormalised), `note`, `changed_at` | Full audit trail of every status transition |
 | `payments` | `id BIGSERIAL` | `alias_id UUID` | `order_id BIGINT FK→orders.id`, `method`, `status`, `amount NUMERIC`, `provider_ref`, `paid_at`, `created_at` | Payment records linked to orders |
 | `shipments` | `id BIGSERIAL` | `alias_id UUID` | `order_id BIGINT FK→orders.id`, `status`, `carrier`, `tracking_no`, `shipped_at`, `delivered_at`, `created_at` | Shipment tracking records |
 
@@ -291,7 +282,7 @@ and API ergonomics:
 | | `title` | `TEXT` | `NOT NULL` | Snapshot: Book title |
 | | `quantity` | `INTEGER` | `NOT NULL`, `CHECK > 0` | Purchased quantity |
 | | `unit_price` | `NUMERIC(12,2)` | `NOT NULL`, `CHECK > 0` | Snapshot: Price at purchase |
-| `order_status_history` | `id` | `BIGSERIAL` | `PRIMARY KEY` | Internal ID |
+| `order_status_histories` | `id` | `BIGSERIAL` | `PRIMARY KEY` | Internal ID |
 | | `alias_id` | `UUID` | `UNIQUE`, `NOT NULL` | External public ID |
 | | `order_id` | `BIGINT` | `FK → orders.id`, `ON DELETE CASCADE` | Linked order |
 | | `old_status` | `VARCHAR(20)` | | Previous state |
@@ -395,21 +386,21 @@ and API ergonomics:
 
 #### Redis Data Models
 
-| Key Pattern | Data Type | Value Structure | Description |
-|---|---|---|---|
-| `users:current_sessions:{aliasID}` | `STRING` | Snappy-compressed JWT | Active user session |
-| `users:blacklist_sessions:{token}` | `STRING` | `"revoked"` | Logged-out token storage |
-| `users:carts:{aliasID}` | `STRING` | Snappy-compressed JSON | Cart cache (List of items) |
-| `users:checkouts:{sessionID}` | `STRING` | Snappy-compressed JSON | Temporary Buy-Now data |
-| `users:orders:{userID}:{page}:{size}` | `STRING` | Snappy-compressed JSON | Paginated order history |
-| `books:details:{bookID}` | `STRING` | Snappy-compressed JSON | Book doc + stock snapshot |
-| `books:newest` | `STRING` | Snappy-compressed JSON | List of newest books |
-| `books:stocks:{bookID}` | `STRING` | `Int` (as String) | Real-time stock counter |
-| `books:categories:{page}:{size}` | `STRING` | Snappy-compressed JSON | Category list cache |
-| `books:best_sellers` | `STRING` | Snappy-compressed JSON | Top 10 books (30d sales) |
-| `books:most_viewed:daily:count` | `ZSET` | `Member: bookID, Score: count` | Live daily view counter |
-| `books:most_viewed:daily:data` | `STRING` | Snappy-compressed JSON | Enriched daily top 10 |
-| `books:most_viewed:30d:data` | `STRING` | Snappy-compressed JSON | Nightly aggregated top 10 |
+| Key Pattern | Data Type | Value Structure | Description | Feature Flag |
+|---|---|---|---|---|
+| `users:current_sessions:{aliasID}` | `STRING` | Snappy-compressed JWT | Active user session | — (always active) |
+| `users:blacklist_sessions:{token}` | `STRING` | `"revoked"` | Logged-out token storage | — (always active) |
+| `users:carts:{aliasID}` | `STRING` | Snappy-compressed JSON | Cart cache (List of items) | `REDIS_CART_CACHE` |
+| `users:checkouts:{sessionID}` | `STRING` | Snappy-compressed JSON | Temporary Buy-Now data | — (always active) |
+| `users:orders:{userID}:{page}:{size}` | `STRING` | Snappy-compressed JSON | Paginated order history | `REDIS_ORDER_HISTORY` |
+| `books:details:{bookID}` | `STRING` | Snappy-compressed JSON | Book doc + stock snapshot | `REDIS_BOOK_CACHE` |
+| `books:newest` | `STRING` | Snappy-compressed JSON | List of newest books | `REDIS_NEWEST_BOOKS` |
+| `books:stocks:{bookID}` | `STRING` | `Int` (as String) | Real-time stock counter | `REDIS_STOCK_CACHE` |
+| `books:categories:{page}:{size}` | `STRING` | Snappy-compressed JSON | Category list cache | `REDIS_CATEGORY_CACHE` |
+| `books:best_sellers` | `STRING` | Snappy-compressed JSON | Top 10 books (30d sales) | `REDIS_BEST_SELLERS` |
+| `books:most_viewed:daily:count` | `ZSET` | `Member: bookID, Score: count` | Live daily view counter | `REDIS_MOST_VIEWED_DAILY` |
+| `books:most_viewed:daily:data` | `STRING` | Snappy-compressed JSON | Enriched daily top 10 | `REDIS_MOST_VIEWED_DAILY` |
+| `books:most_viewed:30d:data` | `STRING` | Snappy-compressed JSON | Nightly aggregated top 10 | `REDIS_MOST_VIEWED_30D` |
 
 #### Database Indexes
 
@@ -432,9 +423,9 @@ and API ergonomics:
 | `orders` | `created_at DESC` | B-TREE | Sorting by date |
 | `order_items` | `order_id` | B-TREE | Order line items |
 | `order_items` | `mongo_book_id` | B-TREE | Sales analytics per book |
-| `order_status_history` | `alias_id` | UNIQUE | External lookup |
-| `order_status_history` | `order_id` | B-TREE | Audit trail lookup |
-| `order_status_history` | `changed_at DESC` | B-TREE | Chronological audit |
+| `order_status_histories` | `alias_id` | UNIQUE | External lookup |
+| `order_status_histories` | `order_id` | B-TREE | Audit trail lookup |
+| `order_status_histories` | `changed_at DESC` | B-TREE | Chronological audit |
 | `carts` | `user_id` | UNIQUE | User cart lookup |
 | `cart_items` | `cart_id` | B-TREE | Cart content lookup |
 | `payments` | `alias_id` | UNIQUE | External lookup |
@@ -478,7 +469,7 @@ and API ergonomics:
 | `books:most_viewed:daily:count` | ZSET | Sorted ranking by view count |
 | `users:blacklist_sessions:{token}` | STRING | Fast token revocation check |
 
-> **Note on `order_status_history.changed_by_admin_alias_id`:** The admin's `alias_id` UUID is
+> **Note on `order_status_histories.changed_by_admin_alias_id`:** The admin's `alias_id` UUID is
 > stored directly in the history row (denormalised). This avoids a JOIN back to the `users` table
 > when serialising history entries — the int64 FK is not stored here because the audit log is
 > write-once and never needs FK enforcement.
@@ -680,7 +671,7 @@ backend/
 │   │   │   ├── user.go
 │   │   │   ├── order.go                 # CreateOrder, UpdateOrderStatus (state machine),
 │   │   │   │                            #  isValidOrderStatusTransition
-│   │   │   ├── order_status_history.go
+│   │   │   ├── order_status_histories.go
 │   │   │   ├── inventory.go             # GetInventoryForUpdate (SELECT FOR UPDATE —
 │   │   │   │                            #  ACID lock for concurrent checkout + admin stock updates)
 │   │   │   ├── cart.go                  # GetOrCreateCartByUserID, UpsertCartItem,
@@ -824,11 +815,14 @@ Set to `false` to bypass the cache layer and always read/write from the primary 
 
 | Config Key | Environment Variable | Default | Controls |
 |---|---|---|---|
-| `redis_book_cache` | `FEATURES_REDIS_BOOK_CACHE` | `true` | NV-B2/B3: book detail, newest books, and stock quantity caches |
+| `redis_book_cache` | `FEATURES_REDIS_BOOK_CACHE` | `true` | NV-B2: book detail cache |
+| `redis_newest_books` | `FEATURES_REDIS_NEWEST_BOOKS` | `true` | NV-B3: newest books list cache |
+| `redis_stock_cache` | `FEATURES_REDIS_STOCK_CACHE` | `true` | NV-F3: real-time stock quantity cache |
 | `redis_cart_cache` | `FEATURES_REDIS_CART_CACHE` | `true` | NV-C1/C2: Redis cart cache read/write layer |
 | `redis_best_sellers` | `FEATURES_REDIS_BEST_SELLERS` | `true` | NV-E2: bestseller JSON cache reads (data written by BestSellerWorker regardless of flag) |
 | `redis_order_history` | `FEATURES_REDIS_ORDER_HISTORY` | `true` | NV-D2: order history page cache (TTL 30 min) |
-| `redis_most_viewed_daily` | `FEATURES_REDIS_MOST_VIEWED_DAILY` | `true` | NV-E3: daily ZINCRBY view counter + on-demand data cache refresh + 30-day cache reads |
+| `redis_most_viewed_daily` | `FEATURES_REDIS_MOST_VIEWED_DAILY` | `true` | NV-E3: daily view counter + daily data cache refresh |
+| `redis_most_viewed_30d` | `FEATURES_REDIS_MOST_VIEWED_30D` | `true` | NV-E3: 30-day aggregated most viewed cache reads |
 | `redis_category_cache` | `FEATURES_REDIS_CATEGORY_CACHE` | `true` | NV-F4: category list page cache |
 
 > **Note:** Session and buy-now checkout session operations (auth-critical) are not flag-controlled and are always active.
@@ -941,10 +935,21 @@ make db-init-mongo
 # 6. Verify Redis connection
 make db-init-redis
 
-# 7. Start the API server
+# 7. Seed large dataset (optional)
+make db-seed
+
+# 8. Verify seeded data (optional)
+make db-seed-verification
+
+# 9. Start the API server
 make run
 # → API:     http://localhost:8080
 # → Swagger: http://localhost:8080/swagger/index.html
+```
+
+**One-liner for easy copy-paste (from Step 2 to 9):**
+```bash
+make db-start && make db-init-pg && make db-admin-pg && make db-init-neo4j && make db-init-mongo && make db-init-redis && make db-seed && make db-seed-verification && make run
 ```
 
 ### 6.3. Troubleshooting & Database Reset
@@ -1012,11 +1017,14 @@ All settings have embedded defaults and can be overridden via environment variab
 
 | Environment Variable | Default | Feature Controlled |
 |---|---|---|
-| `FEATURES_REDIS_BOOK_CACHE` | `true` | Book detail / newest / stock caches (B2, B3) |
+| `FEATURES_REDIS_BOOK_CACHE` | `true` | Book detail cache (B2) |
+| `FEATURES_REDIS_NEWEST_BOOKS` | `true` | Newest books list cache (B3) |
+| `FEATURES_REDIS_STOCK_CACHE` | `true` | Stock quantity cache (F3) |
 | `FEATURES_REDIS_CART_CACHE` | `true` | Cart Redis cache layer (C1, C2) |
 | `FEATURES_REDIS_BEST_SELLERS` | `true` | Best-seller ZSET + cache (E2) |
 | `FEATURES_REDIS_ORDER_HISTORY` | `true` | Order history page cache 30 min TTL (D2) |
-| `FEATURES_REDIS_MOST_VIEWED_DAILY` | `true` | Most-viewed daily ZSET + 30d cache (E3) |
+| `FEATURES_REDIS_MOST_VIEWED_DAILY` | `true` | Most-viewed daily ZSET + daily data cache (E3) |
+| `FEATURES_REDIS_MOST_VIEWED_30D` | `true` | Most-viewed 30-day cache reads (E3) |
 | `FEATURES_REDIS_CATEGORY_CACHE` | `true` | Category list cache (F4) |
 
 Example — disable order-history cache only:
@@ -1041,7 +1049,8 @@ Migrations are managed by **golang-migrate** and live in `db/postgres/migrations
 ```bash
 # Database lifecycle
 make db-start           # docker-compose up -d (all 4 DBs)
-make db-stop            # docker-compose down
+make db-stop            # docker-compose down (stop containers)
+make db-delete          # docker-compose down -v (stop containers and DELETE volumes)
 make db-logs            # Follow container logs
 
 # Initialization
@@ -1050,6 +1059,8 @@ make db-admin-pg        # Create bookstore_admin PG role
 make db-init-mongo      # Create MongoDB collections + indexes
 make db-init-neo4j      # Apply Neo4j constraints/indexes
 make db-init-redis      # Ping Redis to verify connection
+make db-seed            # Seed large dataset (10k+ users, 2k+ books, etc.)
+make db-seed-verification # Verify seeded data across all 4 databases
 
 # Development
 make run                # Start API server (reads .env)

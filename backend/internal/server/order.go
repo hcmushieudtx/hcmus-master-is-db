@@ -23,7 +23,7 @@ import (
 //  3. INSERT order header (status = 'pending').
 //  4. INSERT order_items (price snapshot at purchase time).
 //  5. UPDATE stock_quantity per book (deduct purchased quantity).
-//  6. INSERT order_status_history (old_status = NULL, new_status = 'pending').
+//  6. INSERT order_status_histories (old_status = NULL, new_status = 'pending').
 //
 // After transaction: invalidate Redis cart cache, order-history cache, and stock cache.
 //
