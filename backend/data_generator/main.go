@@ -187,7 +187,13 @@ func seedCategories(ctx context.Context, client *mongo.Client, dbName string, ne
 		_ = neoRepo.UpsertCategoryNode(ctx, cat)
 
 		// Export
-		jsonData, _ := json.Marshal(cat)
+		// We need the JSON to have "_id" instead of "id" so that mongo_seed.json will insert with the exact ID.
+		var m map[string]interface{}
+		b, _ := json.Marshal(cat)
+		json.Unmarshal(b, &m)
+		m["_id"] = map[string]string{"$oid": m["id"].(string)}
+		delete(m, "id")
+		jsonData, _ := json.Marshal(m)
 		exports.Mongo.WriteString(fmt.Sprintf("db.categories.insertOne(%s);\n", string(jsonData)))
 		exports.Neo4j.WriteString(fmt.Sprintf("MERGE (c:Category {categoryId: '%s'}) SET c.name = '%s', c.slug = '%s';\n", cat.ID, escapeSQL(cat.CategoryName), cat.Slug))
 		if cat.ParentCategory != "" {
@@ -209,9 +215,10 @@ func seedBooks(ctx context.Context, client *mongo.Client, dbName string, pgDB *g
 		price := gofakeit.Price(10, 100)
 		stock := rand.Intn(500) + 10
 
+		bookName := gofakeit.BookTitle()
 		book := domain.Book{
 			ID:                mongoID,
-			Name:              gofakeit.BookTitle(),
+			Name:              bookName,
 			ShortDescription:  gofakeit.Sentence(10),
 			DetailDescription: gofakeit.Paragraph(2, 5, 10, "\n"),
 			ProductStatus:     "active",
@@ -224,6 +231,13 @@ func seedBooks(ctx context.Context, client *mongo.Client, dbName string, pgDB *g
 			},
 			Tags: []domain.BookTag{
 				{TagID: gofakeit.UUID(), TagName: gofakeit.Word()},
+			},
+			Images: []domain.BookImage{
+				{
+					IsPrimary: true,
+					Alt:       bookName,
+					URL:       fmt.Sprintf("https://picsum.photos/seed/%s/400/600", mongoID),
+				},
 			},
 		}
 
@@ -251,7 +265,13 @@ func seedBooks(ctx context.Context, client *mongo.Client, dbName string, pgDB *g
 		})
 
 		// Export
-		jsonData, _ := json.Marshal(book)
+		// We need the JSON to have "_id" instead of "id" so that mongo_seed.json will insert with the exact ID.
+		var m map[string]interface{}
+		b, _ := json.Marshal(book)
+		json.Unmarshal(b, &m)
+		m["_id"] = map[string]string{"$oid": m["id"].(string)}
+		delete(m, "id")
+		jsonData, _ := json.Marshal(m)
 		exports.Mongo.WriteString(fmt.Sprintf("db.books.insertOne(%s);\n", string(jsonData)))
 		exports.Postgres.WriteString(fmt.Sprintf("INSERT INTO books_ref (mongo_id, is_active) VALUES ('%s', true);\n", mongoID))
 		exports.Postgres.WriteString(fmt.Sprintf("INSERT INTO inventory (book_id, stock_quantity, updated_at) VALUES ('%s', %d, NOW());\n", mongoID, stock))
@@ -611,7 +631,12 @@ func seedViewLogs(ctx context.Context, client *mongo.Client, dbName string, user
 		if _, err := coll.InsertOne(ctx, logEntry); err != nil {
 			continue
 		}
-		jsonData, _ := json.Marshal(logEntry)
+		var m map[string]interface{}
+		b, _ := json.Marshal(logEntry)
+		json.Unmarshal(b, &m)
+		m["_id"] = map[string]string{"$oid": m["id"].(string)}
+		delete(m, "id")
+		jsonData, _ := json.Marshal(m)
 		exports.Mongo.WriteString(fmt.Sprintf("db.view_event_logs.insertOne(%s);\n", string(jsonData)))
 	}
 }
